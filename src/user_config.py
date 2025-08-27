@@ -6,9 +6,9 @@ class UserConfig:
 
     # --- RL Configuration --- #
     ENABLE_RL = (
-        False  # Enable/disable RL-driven agents (NUM_CHANNELS in sim_params must be 4)
+        True  # Enable/disable RL-driven agents (NUM_CHANNELS in sim_params must be 4)
     )
-    RL_MODE = 1  # 0: SARL or 1: MARL
+    RL_MODE = 0  # 0: SARL or 1: MARL
 
     USE_WANDB = (
         True  # Enable/disable Weights & Biases logging or hyperparameter optimization
@@ -21,7 +21,7 @@ class UserConfig:
     # If "MARL", it can be set to True to disable simultaneous action selection so that
     # agents select actions in a sequential manner, following the logical protocol execution
     # timeline, and thus, act at the most contextually appropriate step.
-    DISABLE_SIMULTANEOUS_ACTION_SELECTION = True
+    DISABLE_SIMULTANEOUS_ACTION_SELECTION = False
 
     # If "MARL", whether to decompose the reward (average packet delay per transmission)
     # into distinct components for each agent (sensing delay, backoff delay, transmission delay, residual delay)
@@ -158,7 +158,7 @@ class UserConfig:
     # - Custom parameters like packet size, burst size, and frame rate for different traffic models.
 
     ENABLE_ADVANCED_NETWORK_CONFIG = (
-        False  # Enable/disable advanced network customizaiton
+        True  # Enable/disable advanced network customizaiton
     )
 
     # Advanced:
@@ -199,6 +199,7 @@ class UserConfig:
                 "pos": (0, 0, 0),
                 "channels": [1],
                 "primary_channel": 1,
+                "rl_driven": True,
             },  # BSS Access Point (AP)
             "stas": [
                 {"id": 2, "pos": (3, 4, 0)},  # Associated Stations (STAs)
@@ -221,7 +222,7 @@ class UserConfig:
         },
         {
             "id": 2,  # Another BSS
-            "ap": {"id": 4, "pos": (5, 5, 1)},
+            "ap": {"id": 4, "pos": (5, 5, 1), "rl_driven": True},
             "stas": [{"id": 5}],
             "traffic_flows": [
                 {

@@ -23,6 +23,7 @@ import random
 import numpy as np
 import wandb
 import math
+from src.rl_interface import ExternalRLInterface
 
 
 BACK_TIMEOUT_us = 281
@@ -134,7 +135,42 @@ class MAC:
 
         self.rng: random.Random = env.rng
 
+        # External RL integration (for SARL multi-AP RLlib control)
+        self.external_mode: bool = False
+        self.rl_interface: ExternalRLInterface | None = None
+        self._await_action_event = None
+        self.external_joint_valid_actions: list[tuple[int, int, int]] | None = None
+        self.last_reward: float = 0.0
+        self.last_delay_components: dict | None = None
+
         self.env.process(self.run())
+
+    def enable_external_control(self, iface: ExternalRLInterface):
+        self.external_mode = True
+        self.rl_interface = iface
+        if self.external_joint_valid_actions is None:
+            self.external_joint_valid_actions = []
+            for c_id, pset in CHANNEL_MAP.items():
+                for p in pset:
+                    for cw_id in CW_MAP.keys():
+                        self.external_joint_valid_actions.append((c_id, p - 1, cw_id))
+        # Register handler to receive actions
+        iface.register_agent(self.node.id, self._on_external_action)
+
+    def _on_external_action(self, action_idx: int):
+        if self.external_joint_valid_actions is None:
+            return
+        action_tuple = self.external_joint_valid_actions[action_idx]
+        # Apply selection
+        self.node.phy_layer.set_channels(CHANNEL_MAP[action_tuple[0]])
+        self.node.phy_layer.set_sensing_channels(PRIMARY_CHANNEL_MAP[action_tuple[1]])
+        self.cw_current = CW_MAP[action_tuple[2]]
+        self.logger.debug(
+            f"{self.node.type} {self.node.id} -> External joint action: {action_tuple}, channel {CHANNEL_MAP[action_tuple[0]]}, primary {PRIMARY_CHANNEL_MAP[action_tuple[1]]}, CW {self.cw_current}"
+        )
+        # Unblock waiting process
+        if self._await_action_event and not self._await_action_event.triggered:
+            self._await_action_event.succeed()
 
     def tx_enqueue(self, packet: Packet):
         """Enqueues a packet for transmission"""
@@ -924,7 +960,8 @@ class MAC:
                     else None
                 )
             if self.tx_queue.items:
-                self._start_rl_agents() if self.rl_driven else None
+                if self.rl_driven:
+                    yield self.env.process(self._start_rl_agents())
 
                 yield self.env.process(self._csma_ca(had_nothing_to_send))
 
@@ -956,17 +993,23 @@ class MAC:
             / self.sparams.MAX_TX_QUEUE_SIZE_pkts,  # normalized in range [0, 1]
         ]
 
-        joint_action = self.rl_controller.decide_joint_action(np.array(joint_ctx))
+        if self.external_mode and self.rl_interface is not None:
+            valid_idxs = list(range(len(self.external_joint_valid_actions)))
+            self._await_action_event = self.env.event()
+            self.rl_interface.publish_decision(
+                self.node.id, "joint", np.array(joint_ctx), valid_idxs
+            )
+            yield self._await_action_event
+        else:
+            joint_action = self.rl_controller.decide_joint_action(np.array(joint_ctx))
 
-        self.node.phy_layer.set_channels(CHANNEL_MAP[joint_action[0]])
+            self.node.phy_layer.set_channels(CHANNEL_MAP[joint_action[0]])
+            self.node.phy_layer.set_sensing_channels(PRIMARY_CHANNEL_MAP[joint_action[1]])
+            self.cw_current = CW_MAP[joint_action[2]]
 
-        self.node.phy_layer.set_sensing_channels(PRIMARY_CHANNEL_MAP[joint_action[1]])
-
-        self.cw_current = CW_MAP[joint_action[2]]
-
-        self.logger.debug(
-            f"{self.node.type} {self.node.id} -> Agent selected action {joint_action}, channel changed to {CHANNEL_MAP[joint_action[0]]}, primary channel changed to {PRIMARY_CHANNEL_MAP[joint_action[1]]}, CW size changed to {self.cw_current}"
-        )
+            self.logger.debug(
+                f"{self.node.type} {self.node.id} -> Agent selected action {joint_action}, channel changed to {CHANNEL_MAP[joint_action[0]]}, primary channel changed to {PRIMARY_CHANNEL_MAP[joint_action[1]]}, CW size changed to {self.cw_current}"
+            )
 
     def _run_channel_agent(self):
         channels_occupancy_ratio = self.node.phy_layer.get_channels_occupancy_ratio()
@@ -1080,7 +1123,11 @@ class MAC:
 
         self._log_to_wandb_delays(delay_components)
 
-        if self.rl_driven:
+        # Persist last reward for external wrappers
+        self.last_delay_components = delay_components
+        self.last_reward = -sum(delay_components.values())
+
+        if self.rl_driven and not self.external_mode:
             self.rl_controller.update_agents(delay_components)
 
     def _run_rl_multi_agent(self):
@@ -1116,7 +1163,10 @@ class MAC:
         joint_freq = self.rl_settings.get("joint_frequency", 1)
         # Check if agent should perform its decision according to its frequency of action
         if self.tx_counter % joint_freq == 0:
-            self._run_joint_agent()
+            if self.external_mode:
+                yield from self._run_joint_agent()
+            else:
+                self._run_joint_agent()
 
     def _start_rl_agents(self):
         if self.backoff_slots == 0 and not self.cts_timedout:
@@ -1135,4 +1185,7 @@ class MAC:
             if self.rl_mode == 1:  # Multi-agent
                 self._run_rl_multi_agent()
             else:  # Single-agent
-                self._run_rl_single_agent()
+                if self.external_mode:
+                    yield from self._run_rl_single_agent()
+                else:
+                    self._run_rl_single_agent()

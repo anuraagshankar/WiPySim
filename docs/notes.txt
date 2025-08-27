@@ -1,0 +1,15 @@
+Classes involved:
+1. Actual RL algo class
+2. RL Controller class
+3. MAC class
+
+Initialization order:
+Node -> MAC -> Controller -> RL class
+MAC: init -> run -> _start_rl_agents -> _run_rl_single_agent -> _run_joint_agent -> Controller: decide_joint_action -> Agent: select_action(context)
+context == state??
+
+What we want:
+An env class that produces the state as context and we have an agent class that can simply accept that state, choose a valid action and coninue
+
+1. Wrap SimPy part in a gym env
+2. Break control at MAC decide_joint_action
