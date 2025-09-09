@@ -11,3 +11,4 @@ optuna
 optuna[visualization]
 plotly
 scikit-learn
+ray[rllib]
