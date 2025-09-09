@@ -961,7 +961,10 @@ class MAC:
                 )
             if self.tx_queue.items:
                 if self.rl_driven:
-                    yield self.env.process(self._start_rl_agents())
+                    if self.external_mode and self.rl_mode == 0:  # SARL external control
+                        yield self.env.process(self._start_rl_agents())
+                    else:
+                        self._start_rl_agents()
 
                 yield self.env.process(self._csma_ca(had_nothing_to_send))
 
