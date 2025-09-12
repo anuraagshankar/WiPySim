@@ -33,7 +33,6 @@ class MultiAPEnv(MultiAgentEnv):
         self._net = None
         self._ap_agents: Dict[str, Any] = {}
         self._ap_id_by_name: Dict[str, int] = {}
-        self._prev_acted: set[str] = set()
         # Shared spaces across agents
         self._obs_space = Box(low=0.0, high=1.0, shape=(9,), dtype=np.float32)
         # Compute joint action count following SARLController
@@ -44,6 +43,9 @@ class MultiAPEnv(MultiAgentEnv):
             for cw_id in CW_MAP.keys()
         ]
         self._act_space = Discrete(len(self._valid_joint_actions))
+        self._has_acted = set()
+
+        self.MIN_REWARD, self.MAX_REWARD = -10000.0, 0
 
     @staticmethod
     def _agent_name(ap_id: int) -> str:
@@ -96,6 +98,7 @@ class MultiAPEnv(MultiAgentEnv):
             ap = self._ap_agents.get(agent_name)
             if ap is None:
                 continue
+            self._has_acted.add(ap.id)
             self._iface.provide_action(ap.id, int(action))
 
         # Run until next pending or end
@@ -111,17 +114,12 @@ class MultiAPEnv(MultiAgentEnv):
 
         # Rewards for APs that acted in the previous call
         for agent_name, ap in self._ap_agents.items():
-            rewards[agent_name] = (
-                float(getattr(ap.mac_layer, "last_reward", 0.0))
-                if agent_name in self._prev_acted
-                else 0.0
-            )
+            if ap.id in pending and ap.id in self._has_acted:
+                reward = float(getattr(ap.mac_layer, "last_reward", 0.0))
+                rewards[agent_name] = np.clip(reward, self.MIN_REWARD, self.MAX_REWARD)
             terminateds[agent_name] = False
             truncateds[agent_name] = False
             infos[agent_name] = {}
-
-        # Track who acted this step (to reward next time)
-        self._prev_acted = set(action_dict.keys())
 
         env_truncated = self._is_truncated()
         terminateds["__all__"] = False
