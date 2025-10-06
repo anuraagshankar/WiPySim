@@ -79,7 +79,6 @@ class MultiAPEnv(MultiAgentEnv):
             pending = self._iface.consume_pending()
             if ap.id in pending:
                 observations[ap_name] = pending[ap.id].obs.astype(np.float32)
-        self._prev_acted = set()
         return observations, {}
 
     def _advance_one_event(self):

@@ -166,8 +166,8 @@ class ConsoleFormatter(logging.Formatter):
 
         if self.cfg.USE_COLORS_IN_LOGS:
             log_color = COLORS.get(record.levelname, COLORS["DEFAULT"])
-            record.clevelname = f"{log_color}{record.levelname}{COLORS["DEFAULT"]}"
-            record.cmsg = f"{log_color}{record.msg}{COLORS["DEFAULT"]}"
+            record.clevelname = f'{log_color}{record.levelname}{COLORS["DEFAULT"]}'
+            record.cmsg = f'{log_color}{record.msg}{COLORS["DEFAULT"]}'
         else:
             record.clevelname = record.levelname
             record.cmsg = record.msg
