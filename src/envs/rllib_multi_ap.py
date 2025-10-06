@@ -6,6 +6,7 @@ import numpy as np
 import simpy
 from gymnasium.spaces import Box, Discrete
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
+from ray.rllib.env.env_context import EnvContext
 
 from src.user_config import UserConfig as cfg_module
 from src.sim_params import SimParams as sparams_module
@@ -24,10 +25,16 @@ class MultiAPEnv(MultiAgentEnv):
     Reward: per-AP negative sum of delays from last tx attempt
     """
 
-    def __init__(self, cfg=cfg_module, sparams=sparams_module):
+    def __init__(self, cfg=None, sparams=None):
         super().__init__()
-        self.cfg = cfg
-        self.sparams = sparams
+        # Handle RLlib's EnvContext: if cfg is an EnvContext, use default modules
+        # Users can pass custom config via env_config in RLlib if needed
+        if cfg is None or isinstance(cfg, (EnvContext, dict)):
+            self.cfg = cfg_module
+            self.sparams = sparams_module
+        else:
+            self.cfg = cfg
+            self.sparams = sparams if sparams is not None else sparams_module
         self._env = None
         self._iface = None
         self._net = None
@@ -110,15 +117,17 @@ class MultiAPEnv(MultiAgentEnv):
         for agent_name, ap in self._ap_agents.items():
             if ap.id in pending:
                 observations[agent_name] = pending[ap.id].obs.astype(np.float32)
+                # Only set terminateds, truncateds, infos for agents with observations
+                terminateds[agent_name] = False
+                truncateds[agent_name] = False
+                infos[agent_name] = {}
 
-        # Rewards for APs that acted in the previous call
-        for agent_name, ap in self._ap_agents.items():
-            if ap.id in pending and ap.id in self._has_acted:
+        # Rewards for APs that acted in the previous call and have pending observations
+        for agent_name in observations.keys():
+            ap = self._ap_agents[agent_name]
+            if ap.id in self._has_acted:
                 reward = float(getattr(ap.mac_layer, "last_reward", 0.0))
                 rewards[agent_name] = np.clip(reward, self.MIN_REWARD, self.MAX_REWARD)
-            terminateds[agent_name] = False
-            truncateds[agent_name] = False
-            infos[agent_name] = {}
 
         env_truncated = self._is_truncated()
         terminateds["__all__"] = False
